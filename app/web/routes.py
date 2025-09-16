@@ -175,6 +175,8 @@ async def contact_detail_page(
     google_token = await session.execute(select(GoogleToken.id).limit(1))
     google_connected = google_token.scalar_one_or_none() is not None
 
+    tags: list[str] = list(contact.tags or [])
+
     contact_payload = {
         "id": contact.id,
         "name": contact.name,
@@ -182,7 +184,7 @@ async def contact_detail_page(
         "title": contact.title or "",
         "email": contact.email or "",
         "phone": contact.phone or "",
-        "tags": contact.tags or [],
+        "tags": tags,
         "note": contact.note or "",
         "last_interacted_at": contact.last_interacted_at,
     }
@@ -192,7 +194,7 @@ async def contact_detail_page(
         {
             "request": request,
             "contact": contact_payload,
-            "tags_string": ", ".join(contact_payload["tags"]),
+            "tags_string": ", ".join(tags),
             "custom_fields": custom_fields,
             "interactions": interactions,
             "reminders": reminders,
