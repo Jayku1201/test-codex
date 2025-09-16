@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}個人用人脈管理{% endblock %}</title>
+    <link rel="stylesheet" href="{{ request.url_for('static', path='styles.css') }}" />
+    <script src="{{ request.url_for('static', path='app.js') }}" defer></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="container header-content">
+        <a href="{{ request.url_for('web_contacts') }}" class="brand">人脈管理</a>
+        <nav class="nav">
+          <a href="{{ request.url_for('web_contacts') }}" class="nav-link">人脈列表</a>
+        </nav>
+      </div>
+    </header>
+    <main class="container">
+      <div id="flash-message" class="flash-message" role="status" aria-live="polite"></div>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
+

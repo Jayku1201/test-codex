@@ -1,128 +1,98 @@
-"""FastAPI application exposing CRM endpoints."""
-from __future__ import annotations
+"""Application entrypoint for the personal contact management service."""
 
-from typing import List, Optional
+import logging
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Response, status
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
-from . import crud, schemas
-from .database import get_db, init_db
+from app.api.v1 import router as api_v1_router
+from app.core.config import Settings, get_settings
+from app.core.db import engine
+from app.core.logging import configure_logging
+from app.models import Base
+from app.web import router as web_router
 
-app = FastAPI(
-    title="Simple CRM API",
-    description="一個簡易的客戶關係管理（CRM）系統，提供客戶與互動紀錄的基本CRUD功能。",
-    version="1.0.0",
-)
+logger = logging.getLogger(__name__)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
+ERROR_CODE_MAP: dict[int, str] = {
+    404: "RESOURCE_NOT_FOUND",
+    422: "VALIDATION_ERROR",
+}
 
 
-@app.get("/health", response_model=schemas.HealthResponse)
-def healthcheck() -> schemas.HealthResponse:
-    return schemas.HealthResponse(status="ok")
+def create_app() -> FastAPI:
+    """Create and configure the FastAPI application instance."""
+    settings = get_settings()
+    configure_logging(settings)
+
+    application = FastAPI(title="Personal Contacts Manager", version=settings.version)
+
+    _configure_cors(application, settings)
+    _configure_exception_handlers(application)
+
+    static_dir = Path(__file__).resolve().parent / "web" / "static"
+    application.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    application.include_router(web_router)
+    application.include_router(api_v1_router, prefix="/api/v1")
+
+    @application.on_event("startup")
+    async def _on_startup() -> None:  # pragma: no cover - exercised via tests
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+    return application
 
 
-@app.post("/customers", response_model=schemas.Customer, status_code=status.HTTP_201_CREATED)
-def create_customer(
-    payload: schemas.CustomerCreate,
-    connection=Depends(get_db),
-) -> schemas.Customer:
-    try:
-        customer = crud.create_customer(connection, payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return customer
+def _configure_cors(application: FastAPI, settings: Settings) -> None:
+    if not settings.cors_origins:
+        return
 
-
-@app.get("/customers", response_model=List[schemas.Customer])
-def list_customers(
-    search: Optional[str] = Query(default=None, description="依姓名、Email、電話或公司模糊查詢"),
-    status_filter: Optional[str] = Query(default=None, alias="status", description="依客戶狀態篩選"),
-    company: Optional[str] = Query(default=None, description="依公司名稱篩選"),
-    limit: int = Query(default=20, ge=1, le=100, description="單頁筆數，最多100筆"),
-    offset: int = Query(default=0, ge=0, description="起始索引"),
-    sort_by: str = Query(default="created_at", description="排序欄位"),
-    sort_order: str = Query(default="desc", description="排序方向（asc/desc）"),
-    connection=Depends(get_db),
-) -> List[schemas.Customer]:
-    return crud.list_customers(
-        connection,
-        search=search,
-        status=status_filter,
-        company=company,
-        limit=limit,
-        offset=offset,
-        sort_by=sort_by,
-        sort_order=sort_order,
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
 
-@app.get("/customers/{customer_id}", response_model=schemas.Customer)
-def get_customer(customer_id: int, connection=Depends(get_db)) -> schemas.Customer:
-    customer = crud.get_customer(connection, customer_id)
-    if not customer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    return customer
+def _configure_exception_handlers(application: FastAPI) -> None:
+    application.add_exception_handler(HTTPException, _http_exception_handler)
+    application.add_exception_handler(RequestValidationError, _validation_exception_handler)
+    application.add_exception_handler(Exception, _unhandled_exception_handler)
 
 
-@app.put("/customers/{customer_id}", response_model=schemas.Customer)
-def update_customer(
-    customer_id: int,
-    payload: schemas.CustomerUpdate,
-    connection=Depends(get_db),
-) -> schemas.Customer:
-    try:
-        customer = crud.update_customer(connection, customer_id, payload)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-    if not customer:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    return customer
+async def _http_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, HTTPException)
+    if isinstance(exc.detail, dict):
+        message = str(exc.detail.get("message", "")) or str(exc.detail)
+        code = exc.detail.get(
+            "code", ERROR_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
+        )
+    else:
+        message = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+        code = ERROR_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
+    return _error_response(code, message, exc.status_code)
 
 
-@app.delete("/customers/{customer_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_customer(customer_id: int, connection=Depends(get_db)) -> Response:
-    deleted = crud.delete_customer(connection, customer_id)
-    if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+async def _validation_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, RequestValidationError)
+    logger.info("Validation error", extra={"errors": exc.errors()})
+    return _error_response("VALIDATION_ERROR", "Validation error", status_code=422)
 
 
-@app.get("/customers/{customer_id}/interactions", response_model=List[schemas.Interaction])
-def list_customer_interactions(customer_id: int, connection=Depends(get_db)) -> List[schemas.Interaction]:
-    if not crud.get_customer(connection, customer_id):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    return crud.list_interactions(connection, customer_id=customer_id)
+async def _unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled application error")
+    return _error_response("INTERNAL_SERVER_ERROR", "Internal server error", status_code=500)
 
 
-@app.post(
-    "/customers/{customer_id}/interactions",
-    response_model=schemas.Interaction,
-    status_code=status.HTTP_201_CREATED,
-)
-def create_customer_interaction(
-    customer_id: int,
-    payload: schemas.InteractionCreate,
-    connection=Depends(get_db),
-) -> schemas.Interaction:
-    interaction = crud.create_interaction(connection, customer_id, payload)
-    if not interaction:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
-    return interaction
+def _error_response(code: str, message: str, status_code: int) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
 
 
-@app.get("/interactions", response_model=List[schemas.Interaction])
-def list_interactions(connection=Depends(get_db)) -> List[schemas.Interaction]:
-    return crud.list_interactions(connection)
+app = create_app()
