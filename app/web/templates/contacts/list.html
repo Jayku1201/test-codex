@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+
+{% block title %}人脈列表 · 個人用人脈管理{% endblock %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>人脈列表</h1>
+      <p class="page-subtitle">快速檢視、搜尋與整理個人聯絡人</p>
+    </div>
+    <div class="page-actions">
+      <button type="button" class="button secondary" data-open-modal="export-modal">
+        下載 CSV
+      </button>
+      <button type="button" class="button primary" data-open-modal="import-modal">
+        上傳 CSV
+      </button>
+    </div>
+  </section>
+
+  <form class="search-form" method="get">
+    <div class="search-row">
+      <input
+        type="text"
+        name="keyword"
+        value="{{ keyword }}"
+        placeholder="搜尋姓名、公司、Email、電話或備註"
+      />
+      <button type="submit" class="button">搜尋</button>
+      {% if keyword or active_tag %}
+        <a class="link-button" href="{{ request.url_for('web_contacts') }}">清除篩選</a>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if tag_filters %}
+    <div class="chip-group" aria-label="標籤篩選">
+      {% for item in tag_filters %}
+        <a
+          class="chip {% if item.selected %}chip-selected{% endif %}"
+          href="{{ request.url_for('web_contacts') }}?tag={{ item.value }}{% if keyword %}&keyword={{ keyword | urlencode }}{% endif %}"
+        >
+          {{ item.value }}
+        </a>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="table-wrapper">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>姓名</th>
+          <th>公司</th>
+          <th>職稱</th>
+          <th>Email</th>
+          <th>電話</th>
+          <th>標籤</th>
+          <th>最後互動</th>
+          <th>摘要 / 近期備註</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for contact in contacts %}
+          <tr>
+            <td data-label="姓名">
+              <a href="{{ request.url_for('web_contact_detail', contact_id=contact.id) }}" class="link-strong">
+                {{ contact.name }}
+              </a>
+            </td>
+            <td data-label="公司">{{ contact.company or "-" }}</td>
+            <td data-label="職稱">{{ contact.title or "-" }}</td>
+            <td data-label="Email">{{ contact.email or "-" }}</td>
+            <td data-label="電話">{{ contact.phone or "-" }}</td>
+            <td data-label="標籤">
+              {% if contact.tags %}
+                <span class="tag-list">{{ contact.tags | join(", ") }}</span>
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td data-label="最後互動">
+              {% if contact.last_interacted_at %}
+                {{ contact.last_interacted_at.strftime("%Y-%m-%d %H:%M") }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td data-label="摘要 / 近期備註">
+              <div class="text-muted">{{ contact.latest_summary or "" }}</div>
+              <div>{{ contact.recent_note | default("") | truncate(80, True) }}</div>
+            </td>
+          </tr>
+        {% else %}
+          <tr>
+            <td colspan="8" class="empty">目前尚未有任何人脈資料，請先新增或匯入。</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div id="export-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="export-modal-title">匯出聯絡人</h2>
+        <button type="button" class="icon-button" data-close-modal>&times;</button>
+      </div>
+      <form id="export-form" class="modal-body">
+        <label class="form-field">
+          <span>標籤（逗號分隔，可留空）</span>
+          <input type="text" name="tags" placeholder="投資人,台北" />
+        </label>
+        <div class="form-grid">
+          <label class="form-field">
+            <span>起始日期</span>
+            <input type="date" name="from" />
+          </label>
+          <label class="form-field">
+            <span>結束日期</span>
+            <input type="date" name="to" />
+          </label>
+        </div>
+        <label class="form-checkbox">
+          <input type="checkbox" name="include_private" value="true" />
+          <span>包含 Email 與電話</span>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="button secondary" data-close-modal>取消</button>
+          <button type="submit" class="button primary">下載</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="import-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="import-modal-title">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="import-modal-title">匯入聯絡人</h2>
+        <button type="button" class="icon-button" data-close-modal>&times;</button>
+      </div>
+      <form id="import-form" class="modal-body" enctype="multipart/form-data">
+        <label class="form-field">
+          <span>CSV 檔案</span>
+          <input type="file" name="file" accept=".csv" required />
+        </label>
+        <label class="form-field">
+          <span>模式</span>
+          <select name="mode">
+            <option value="create_only">僅新增（忽略既有資料）</option>
+            <option value="upsert">更新或新增</option>
+          </select>
+        </label>
+        <label class="form-checkbox">
+          <input type="checkbox" name="auto_create_fields" value="true" />
+          <span>自動建立文字類型自訂欄位</span>
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="button" id="import-dry-run">預檢（Dry-Run）</button>
+          <button type="button" class="button primary" id="import-submit">正式匯入</button>
+          <button type="button" class="button secondary" data-close-modal>關閉</button>
+        </div>
+        <div id="import-report" class="import-report" aria-live="polite"></div>
+      </form>
+    </div>
+  </div>
+{% endblock %}
+

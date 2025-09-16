@@ -1,5 +1,11 @@
-fastapi==0.110.0
-uvicorn==0.29.0
-pytest==8.1.1
-httpx==0.27.2
-email-validator==2.2.0
+fastapi
+uvicorn
+pydantic
+email-validator
+sqlalchemy
+aiosqlite
+httpx
+pytest
+python-dotenv
+python-multipart
+jinja2

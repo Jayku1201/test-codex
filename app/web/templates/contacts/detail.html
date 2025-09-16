@@ -1,0 +1,292 @@
+{% extends "base.html" %}
+
+{% block title %}{{ contact.name }} · 人脈明細{% endblock %}
+
+{% block content %}
+  <a href="{{ request.url_for('web_contacts') }}" class="link-button">← 回列表</a>
+
+  <section class="page-header">
+    <div>
+      <h1>{{ contact.name }}</h1>
+      <p class="page-subtitle">整理基本資料、自訂欄位、互動紀錄與提醒</p>
+    </div>
+    <div class="integration-status">
+      {% if google_connected %}
+        <span class="badge success">Google 行事曆：已連結</span>
+        <a href="{{ google_authorize_url }}" class="link-button">重新連結</a>
+      {% else %}
+        <span class="badge muted">Google 行事曆：未連結</span>
+        <a href="{{ google_authorize_url }}" class="button small">立即連結</a>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>基本資料</h2>
+    <form id="contact-form" data-contact-id="{{ contact.id }}" class="form-grid">
+      <label class="form-field">
+        <span>姓名 *</span>
+        <input type="text" name="name" value="{{ contact.name }}" required maxlength="60" />
+      </label>
+      <label class="form-field">
+        <span>公司</span>
+        <input type="text" name="company" value="{{ contact.company }}" />
+      </label>
+      <label class="form-field">
+        <span>職稱</span>
+        <input type="text" name="title" value="{{ contact.title }}" />
+      </label>
+      <label class="form-field">
+        <span>Email</span>
+        <input type="email" name="email" value="{{ contact.email }}" />
+      </label>
+      <label class="form-field">
+        <span>電話</span>
+        <input type="tel" name="phone" value="{{ contact.phone }}" />
+      </label>
+      <label class="form-field">
+        <span>標籤（逗號分隔）</span>
+        <input type="text" name="tags" value="{{ tags_string }}" placeholder="例如：投資人,VIP" />
+      </label>
+      <label class="form-field form-wide">
+        <span>備註</span>
+        <textarea name="note" rows="4" placeholder="補充備註">{{ contact.note }}</textarea>
+      </label>
+      <div class="form-field form-wide readonly-field">
+        <span>最後互動時間</span>
+        <div>
+          {% if contact.last_interacted_at %}
+            {{ contact.last_interacted_at.strftime("%Y-%m-%d %H:%M") }}
+          {% else %}
+            尚無紀錄
+          {% endif %}
+        </div>
+      </div>
+
+      <fieldset class="form-section form-wide">
+        <legend>自訂欄位</legend>
+        {% if custom_fields %}
+          <div class="custom-fields">
+            {% for field in custom_fields %}
+              {% if field.type == 'bool' %}
+                <label class="form-checkbox custom-field">
+                  <input
+                    type="checkbox"
+                    data-custom-field
+                    data-field-key="{{ field.key }}"
+                    data-field-type="{{ field.type }}"
+                    {% if field.value %}checked{% endif %}
+                  />
+                  <span>{{ field.label }}</span>
+                </label>
+              {% elif field.type == 'single_select' %}
+                <label class="form-field custom-field">
+                  <span>{{ field.label }}{% if field.required %}<span class="required">*</span>{% endif %}</span>
+                  <select
+                    data-custom-field
+                    data-field-key="{{ field.key }}"
+                    data-field-type="{{ field.type }}"
+                    {% if field.required %}required{% endif %}
+                  >
+                    <option value="">-- 請選擇 --</option>
+                    {% for option in field.options %}
+                      <option value="{{ option }}" {% if field.value == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                  </select>
+                </label>
+              {% elif field.type == 'multi_select' %}
+                <label class="form-field custom-field">
+                  <span>{{ field.label }}{% if field.required %}<span class="required">*</span>{% endif %}</span>
+                  <input
+                    type="text"
+                    placeholder="以逗號分隔多選值"
+                    value="{% if field.value %}{{ field.value | join(', ') }}{% endif %}"
+                    data-custom-field
+                    data-field-key="{{ field.key }}"
+                    data-field-type="{{ field.type }}"
+                    {% if field.required %}required{% endif %}
+                  />
+                </label>
+              {% else %}
+                <label class="form-field custom-field">
+                  <span>{{ field.label }}{% if field.required %}<span class="required">*</span>{% endif %}</span>
+                  <input
+                    {% if field.type == 'number' %}type="number" step="any"{% elif field.type == 'date' %}type="date"{% elif field.type == 'email' %}type="email"{% elif field.type == 'phone' %}type="tel"{% else %}type="text"{% endif %}
+                    value="{{ field.value if field.value is not none else '' }}"
+                    data-custom-field
+                    data-field-key="{{ field.key }}"
+                    data-field-type="{{ field.type }}"
+                    {% if field.required %}required{% endif %}
+                  />
+                </label>
+              {% endif %}
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="text-muted">目前沒有自訂欄位。</p>
+        {% endif %}
+      </fieldset>
+
+      <div class="form-actions form-wide">
+        <button type="submit" class="button primary">儲存基本資料</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>互動紀錄</h2>
+    <form id="interaction-form" data-contact-id="{{ contact.id }}" class="form-grid">
+      <label class="form-field">
+        <span>互動類型</span>
+        <select name="type">
+          {% for value in interaction_types %}
+            <option value="{{ value }}">{{ value }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="form-field">
+        <span>發生時間</span>
+        <input type="datetime-local" name="happened_at" required />
+      </label>
+      <label class="form-field">
+        <span>摘要</span>
+        <input type="text" name="summary" placeholder="簡短描述" />
+      </label>
+      <label class="form-field form-wide">
+        <span>內容</span>
+        <textarea name="content" rows="3" placeholder="互動細節"></textarea>
+      </label>
+      <div class="form-actions form-wide">
+        <button type="submit" class="button">新增互動紀錄</button>
+      </div>
+    </form>
+
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>時間</th>
+            <th>類型</th>
+            <th>摘要</th>
+            <th>內容</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in interactions %}
+            <tr>
+              <td data-label="時間">{{ item.happened_at.strftime("%Y-%m-%d %H:%M") }}</td>
+              <td data-label="類型">{{ item.type }}</td>
+              <td data-label="摘要">{{ item.summary or '-' }}</td>
+              <td data-label="內容">{{ item.content or '-' }}</td>
+              <td data-label="操作">
+                <button type="button" class="link-button delete-interaction" data-interaction-id="{{ item.id }}">
+                  刪除
+                </button>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="5" class="empty">尚未建立任何互動紀錄。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>提醒</h2>
+    <form id="reminder-form" data-contact-id="{{ contact.id }}" class="form-grid">
+      <label class="form-field">
+        <span>提醒日期</span>
+        <input type="date" name="remind_at" required />
+      </label>
+      <label class="form-field form-wide">
+        <span>提醒內容</span>
+        <textarea name="content" rows="3" required placeholder="要做的事情"></textarea>
+      </label>
+      <label class="form-checkbox">
+        <input
+          type="checkbox"
+          name="sync_google"
+          value="true"
+          {% if not google_connected %}disabled{% endif %}
+        />
+        <span>同步到 Google 行事曆</span>
+      </label>
+      <p class="help-text form-wide">
+        {% if google_connected %}
+          建立提醒時會同步到主要行事曆，可於下方列表檢視事件狀態。
+        {% else %}
+          尚未連結 Google 行事曆，請先完成授權以啟用同步。
+        {% endif %}
+      </p>
+      <div class="form-actions form-wide">
+        <button type="submit" class="button">新增提醒</button>
+      </div>
+    </form>
+
+    <div class="table-wrapper">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>提醒日期</th>
+            <th>內容</th>
+            <th>完成狀態</th>
+            <th>Google 同步</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for reminder in reminders %}
+            <tr>
+              <td data-label="提醒日期">{{ reminder.remind_at.strftime("%Y-%m-%d") }}</td>
+              <td data-label="內容">{{ reminder.content }}</td>
+              <td data-label="完成狀態">
+                {% if reminder.done %}
+                  <span class="badge success">完成</span>
+                {% else %}
+                  <span class="badge muted">未完成</span>
+                {% endif %}
+              </td>
+              <td data-label="Google 同步">
+                {% if reminder.sync_google %}
+                  {% if reminder.google_event_id %}
+                    <span class="badge success">已同步</span>
+                  {% else %}
+                    <span class="badge muted">等待同步</span>
+                  {% endif %}
+                {% else %}
+                  <span class="badge muted">-</span>
+                {% endif %}
+              </td>
+              <td data-label="操作" class="table-actions">
+                <button
+                  type="button"
+                  class="link-button toggle-reminder"
+                  data-reminder-id="{{ reminder.id }}"
+                  data-reminder-done="{{ 'true' if reminder.done else 'false' }}"
+                >
+                  {% if reminder.done %}標記未完成{% else %}標記完成{% endif %}
+                </button>
+                <button
+                  type="button"
+                  class="link-button delete-reminder"
+                  data-reminder-id="{{ reminder.id }}"
+                >
+                  刪除
+                </button>
+              </td>
+            </tr>
+          {% else %}
+            <tr>
+              <td colspan="5" class="empty">尚未建立提醒。</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+
