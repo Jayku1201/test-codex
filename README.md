@@ -1,52 +1,18 @@
-# Simple CRM 系統
+# LINE + GPT 助手專案
 
-本專案實作一個以 FastAPI 打造的簡易客戶關係管理（CRM）服務，提供客戶資料與互動紀錄的 CRUD API，方便中小型團隊快速建置客戶資料管理系統。
+本個倉庫目前用於建立一個結合 LINE 官方帳號與 GPT 的智慧助手系統。這個助手將協助使用者在 LINE 對話中快速記錄、分類與摘要資訊，並可將訊息與檔案儲存至 Supabase 資料庫及 Storage，以便日後查詢與分析。
 
-## 功能特色
+## 專案目標
+- 建立 webhook 服務，接收 LINE Messaging API 事件並即時回覆。
+- 整合 OpenAI GPT 模型進行意圖判斷與資訊提取。
+- 將所有訊息與檔案完整留存，存入雲端資料庫。
+- 提供簡易管理介面與查詢 API。
 
-- 客戶資料新增、查詢、修改與刪除
-- 可依姓名、Email、電話或公司進行模糊搜尋
-- 透過狀態與公司欄位進行篩選與排序
-- 客戶互動紀錄管理（新增、查詢與總覽）
-- SQLite 持久化儲存，測試時可自訂資料庫路徑
+## 目前進度
+- [ ] 架構設計與資料模型規劃
+- [ ] 後端服務開發（Node.js 或 Python）
+- [ ] Supabase 專案設定（資料庫與 Storage）
+- [ ] LINE 官方帳號與 Messaging API 設定
 
-## 環境需求
-
-- Python 3.9+
-- pip 套件管理工具
-
-## 安裝步驟
-
-```bash
-pip install -r requirements.txt
-```
-
-## 執行 API 服務
-
-```bash
-uvicorn app.main:app --reload
-```
-
-啟動後即可透過 `http://127.0.0.1:8000/docs` 進入自動產生的互動式 API 文件。
-
-## 主要 API 一覽
-
-| 方法 | 路徑 | 說明 |
-| ---- | ---- | ---- |
-| GET | `/health` | 服務健康檢查 |
-| POST | `/customers` | 建立客戶資料 |
-| GET | `/customers` | 取得客戶清單（支援搜尋、篩選、排序） |
-| GET | `/customers/{customer_id}` | 取得特定客戶資料 |
-| PUT | `/customers/{customer_id}` | 更新客戶資料 |
-| DELETE | `/customers/{customer_id}` | 刪除客戶 |
-| GET | `/customers/{customer_id}/interactions` | 查詢客戶互動紀錄 |
-| POST | `/customers/{customer_id}/interactions` | 新增客戶互動紀錄 |
-| GET | `/interactions` | 瀏覽全部互動紀錄 |
-
-## 執行測試
-
-```bash
-pytest
-```
-
-測試會自動使用臨時 SQLite 資料庫，以確保環境乾淨且可重複執行。
+## 原有程式
+此儲存庫原本包含一個以 FastAPI 打造的簡易 CRM 範例程式碼。這些程式碼目前依然保留在倉庫中，但不再作為主要目標。後續如需參考，可在 `app` 及其他原有目錄中找到。
