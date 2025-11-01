@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Admin - Message Records</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body>
+  <h1>Message Records</h1>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>User</th>
+        <th>Type</th>
+        <th>Text</th>
+        <th>Created At</th>
+        <th>Attachments</th>
+        <th>Extractions</th>
+      </tr>
+    </thead>
+    <tbody id="table-body">
+    </tbody>
+  </table>
+  <script>
+    async function loadMessages() {
+      try {
+        const response = await fetch('/admin/messages');
+        const result = await response.json();
+        const body = document.getElementById('table-body');
+        result.messages.forEach(msg => {
+          const tr = document.createElement('tr');
+          // Build attachments links
+          let attachments = '';
+          if (msg.attachments && msg.attachments.length > 0) {
+            attachments = msg.attachments.map(a => {
+              return '<a href="' + a.object_storage_url + '" target="_blank">file</a>';
+            }).join(', ');
+          }
+          // Build extraction data string
+          let extractionData = '';
+          if (msg.extractions && msg.extractions.length > 0) {
+            extractionData = JSON.stringify(msg.extractions[0].data);
+          }
+          tr.innerHTML = '<td>' + msg.id + '</td>' +
+                         '<td>' + (msg.user_id || '') + '</td>' +
+                         '<td>' + msg.type + '</td>' +
+                         '<td>' + (msg.message_text || '') + '</td>' +
+                         '<td>' + (msg.created_at || '') + '</td>' +
+                         '<td>' + attachments + '</td>' +
+                         '<td>' + extractionData + '</td>';
+          body.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    document.addEventListener('DOMContentLoaded', loadMessages);
+  </script>
+</body>
+</html>
