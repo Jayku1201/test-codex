@@ -1,178 +1,178 @@
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const { Client } = require('@line/bot-sdk');
 const { createClient } = require('@supabase/supabase-js');
-
-// LINE and Supabase configuration
-const config = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.LINE_CHANNEL_SECRET,
-};
-
-const lineClient = new Client(config);
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
 
 const app = express();
 app.use(express.json());
 
-// helper: download message content from LINE
+// Load environment variables
+const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+
+// Initialize Supabase client
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Helper to send reply messages without using LINE SDK
+async function replyToLine(replyToken, message) {
+  if (!LINE_CHANNEL_ACCESS_TOKEN) {
+    console.error('Missing LINE channel access token');
+    return;
+  }
+  try {
+    await axios.post(
+      'https://api.line.me/v2/bot/message/reply',
+      {
+        replyToken,
+        messages: Array.isArray(message) ? message : [message],
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
+        },
+      },
+    );
+  } catch (err) {
+    console.error('LINE reply error:', err.response?.data || err.message);
+  }
+}
+
+// Helper: download message content from LINE (image/video/audio/file)
 async function downloadContent(messageId) {
-  const res = await axios.get(`https://api.line.me/v2/bot/message/${messageId}/content`, {
+  if (!LINE_CHANNEL_ACCESS_TOKEN) {
+    throw new Error('Missing LINE channel access token');
+  }
+  const url = `https://api-data.line.me/v2/bot/message/${messageId}/content`;
+  const res = await axios.get(url, {
     responseType: 'arraybuffer',
     headers: {
-      Authorization: `Bearer ${config.channelAccessToken}`,
+      Authorization: `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`,
     },
   });
   return res.data;
 }
 
-// helper: call OpenAI API to summarize text
+// Helper: summarize text using OpenAI
 async function summarizeText(text) {
+  if (!OPENAI_API_KEY) {
+    return null;
+  }
   try {
-    const res = await axios.post(
+    const response = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       {
         model: 'gpt-3.5-turbo',
         messages: [
-          { role: 'system', content: '\u4f60\u662f\u4e00\u500b\u7528\u4e2d\u6587\u56de\u7b54\u7684\u6458\u8981\u52a9\u624b\uff0c\u8acb\u7c21\u77ed\u6458\u8981\u4ee5\u4e0b\u6587\u5b57\u5167\u5bb9\u3002' },
+          { role: 'system', content: 'You are a helpful assistant that summarizes Chinese text concisely.' },
           { role: 'user', content: text },
         ],
+        max_tokens: 100,
+        temperature: 0.5,
       },
       {
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
         },
-      }
+      },
     );
-    return res.data.choices?.[0]?.message?.content?.trim() || '';
+    return response.data.choices?.[0]?.message?.content?.trim();
   } catch (err) {
-    console.error('OpenAI summarization error:', err.message);
-    return '';
+    console.error('OpenAI summarization error:', err.response?.data || err.message);
+    return null;
   }
 }
 
-// handle each event from webhook
+// Handle incoming LINE events
 async function handleEvent(event) {
-  if (event.type !== 'message') {
-    return Promise.resolve(null);
-  }
-
-  const message = event.message;
-
-  // save raw event to messages table
+  // Save raw event
   try {
     await supabase.from('messages').insert([
       {
-        line_message_id: message.id,
-        type: message.type,
-        raw_event: event,
+        event: event,
+        message_id: event.message?.id || null,
+        type: event.type,
+        created_at: new Date().toISOString(),
       },
     ]);
-  } catch (e) {
-    console.error('Failed to insert message:', e.message);
+  } catch (err) {
+    console.error('Supabase insert message error:', err);
   }
 
-  // process text messages
+  if (event.type !== 'message' || !event.message) return;
+
+  const replyToken = event.replyToken;
+  const message = event.message;
+
   if (message.type === 'text') {
-    const summary = await summarizeText(message.text || '');
-    // save extraction
+    const summary = await summarizeText(message.text);
     try {
       await supabase.from('extractions').insert([
         {
-          line_message_id: message.id,
-          schema: 'summary',
-          data: { summary },
-          confidence: 1.0,
+          message_id: message.id,
+          summary: summary,
+          created_at: new Date().toISOString(),
         },
       ]);
-    } catch (e) {
-      console.error('Failed to insert extraction:', e.message);
-    }
-    // reply to user
-    return lineClient.replyMessage(event.replyToken, {
-      type: 'text',
-      text: summary || `\u6536\u5230\uff1a${message.text}`,
-    });
-  }
-
-  // process images, videos, audio or files
-  if (['image', 'video', 'audio', 'file'].includes(message.type)) {
-    try {
-      const buffer = await downloadContent(message.id);
-      const timestamp = Date.now();
-      const ext = message.type === 'image' ? 'jpg' : message.type === 'video' ? 'mp4' : message.type === 'audio' ? 'm4a' : 'bin';
-      const fileName = `${message.id}-${timestamp}.${ext}`;
-      const contentType =
-        message.type === 'image'
-          ? 'image/jpeg'
-          : message.type === 'video'
-          ? 'video/mp4'
-          : message.type === 'audio'
-          ? 'audio/m4a'
-          : 'application/octet-stream';
-
-      // upload to Supabase Storage bucket 'attachments'
-      const { error: uploadError } = await supabase.storage
-        .from('attachments')
-        .upload(fileName, buffer, { contentType });
-
-      if (uploadError) {
-        console.error('Upload error:', uploadError);
-      }
-
-      // get public URL
-      const { data: publicData } = supabase.storage.from('attachments').getPublicUrl(fileName);
-      const publicUrl = publicData?.publicUrl || null;
-
-      // insert attachment record
-      await supabase.from('attachments').insert([
-        {
-          line_message_id: message.id,
-          name: message.fileName || fileName,
-          content_type: contentType,
-          size: buffer.length,
-          storage_path: fileName,
-          public_url: publicUrl,
-        },
-      ]);
-
-      // reply to user
-      return lineClient.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '\u6536\u5230\u60a8\u7684\u6a94\u6848\uff0c\u6211\u5011\u5df2\u4fdd\u5b58\u3002',
-      });
     } catch (err) {
-      console.error('Attachment processing error:', err);
-      return lineClient.replyMessage(event.replyToken, {
-        type: 'text',
-        text: '\u62b1\u6b49\uff0c\u8655\u7406\u6a94\u6848\u6642\u767c\u751f\u932f\u8aa4\u3002',
-      });
+      console.error('Supabase insert extraction error:', err);
     }
+    const replyText = summary ? `\u6458\u8981\uff1a${summary}` : '已收到訊息';
+    await replyToLine(replyToken, { type: 'text', text: replyText });
+  } else if (['image', 'video', 'audio', 'file'].includes(message.type)) {
+    try {
+      const data = await downloadContent(message.id);
+      // Determine file extension
+      let fileExt = 'dat';
+      if (message.type === 'image') fileExt = 'jpg';
+      else if (message.type === 'audio') fileExt = 'm4a';
+      else if (message.type === 'video') fileExt = 'mp4';
+      else if (message.fileName) {
+        const parts = message.fileName.split('.');
+        fileExt = parts[parts.length - 1];
+      }
+      const filePath = `${message.id}-${Date.now()}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from('attachments').upload(filePath, data, {
+        contentType: message.type === 'file' && message.fileName ? undefined : `${message.type}/${fileExt}`,
+      });
+      if (uploadError) {
+        console.error('Supabase storage upload error:', uploadError);
+      } else {
+        const { data: publicData } = supabase.storage.from('attachments').getPublicUrl(filePath);
+        await supabase.from('attachments').insert([
+          {
+            message_id: message.id,
+            type: message.type,
+            url: publicData?.publicUrl || '',
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+      await replyToLine(replyToken, { type: 'text', text: '已收到您的檔案，我們已經儲存。' });
+    } catch (err) {
+      console.error('Attachment handling error:', err);
+      await replyToLine(replyToken, { type: 'text', text: '抱歉，檔案處理發生錯誤。' });
+    }
+  } else {
+    await replyToLine(replyToken, { type: 'text', text: '已收到訊息' });
   }
-
-  // for other message types
-  return lineClient.replyMessage(event.replyToken, {
-    type: 'text',
-    text: '\u6536\u5230\u60a8\u7684\u8a0a\u606f\uff01',
-  });
 }
 
-// webhook route
+// Webhook endpoint
 app.post('/webhook', async (req, res) => {
-  const events = req.body.events;
-  if (!events || events.length === 0) {
-    return res.status(200).send('No events');
+  const events = req.body.events || [];
+  for (const event of events) {
+    await handleEvent(event);
   }
-  // handle all events concurrently
-  await Promise.all(events.map((e) => handleEvent(e)));
   res.status(200).send('OK');
 });
 
-// health check
+// Health check
 app.get('/', (req, res) => {
-  res.send('LINE GPT assistant server is running');
+  res.send('LINE GPT assistant is running');
 });
 
 const port = process.env.PORT || 3000;
