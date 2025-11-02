@@ -16,6 +16,9 @@ const {
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const app = express();
+
+// Check if Supabase credentials exist
+const hasSupabase = SUPABASE_URL && SUPABASE_ANON_KEY;
 app.use(express.json());
 
 // Helper to send reply messages without using LINE SDK
@@ -84,6 +87,7 @@ async function summarizeText(text) {
       },
       {
         headers: {
+ 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${OPENAI_API_KEY}`,
         },
@@ -105,6 +109,7 @@ async function handleMessage(event) {
   let insertedMessage;
   try {
     const { data, error } = await supabase
+ 
       .from('messages')
       .insert({
         user_id: userId,
@@ -178,7 +183,12 @@ app.post('/webhook', async (req, res) => {
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
 // API endpoint to fetch messages with attachments and extractions
-app.get('/admin/messages', async (req, res) => {
+app.get('/admin/messages', async (req, res) => {    if (!hasSupabase) {
+        res.json([]);
+        return;
+    }
+
+
   try {
     const { data, error } = await supabase
       .from('messages')
