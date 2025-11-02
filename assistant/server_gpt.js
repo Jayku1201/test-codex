@@ -244,7 +244,7 @@ async function handleMessage(event) {
       }
       await replyToLine(replyToken, { type: 'text', text: '收到' });
       // Original default reply:// Default reply
-  await replyToLine(replyToken, { type: 'text', text: '收到您的訊息！' });
+  /// waait replyToLine(replyToken, { type: 'text', text: '收到您的訊息！' });
 }
 
 app.post('/webhook', async (req, res) => {
