@@ -25,6 +25,10 @@ function setAdminUserIdIfUnset(userId) {
     // TODO: optionally persist adminUserId to database if required
   }
 }
+  // Track last default text message and timestamp to avoid duplicate replies
+  let lastDefaultMessage = null;
+  let lastDefaultTimestamp = 0;
+
 
 const app = express();
 app.use(express.json());
@@ -228,7 +232,18 @@ async function handleMessage(event) {
     return;
   }
 
-  // Default reply
+        // Default reply with deduplication
+      if (message.type === 'text') {
+        const now = Date.now();
+        if (lastDefaultMessage === message.text && (now - lastDefaultTimestamp) < 10000) {
+          // Skip replying if same message within 10 seconds
+          return;
+        }
+        lastDefaultMessage = message.text;
+        lastDefaultTimestamp = now;
+      }
+      await replyToLine(replyToken, { type: 'text', text: '收到' });
+      // Original default reply:// Default reply
   await replyToLine(replyToken, { type: 'text', text: '收到您的訊息！' });
 }
 
