@@ -138,8 +138,7 @@ async function handleMessage(event) {
         'application/octet-stream';
       // Only upload and save attachment if Supabase is configured and message inserted
       if (hasSupabase && insertedMessage) {
-        if (hasSupabase && insertedMessage) {
-const publicUrl = await uploadToSupabase(buffer, fileName, contentType);
+        const publicUrl = await uploadToSupabase(buffer, fileName, contentType);
         await supabase.from('attachments').insert({
           message_id: insertedMessage.id,
           object_storage_url: publicUrl,
@@ -192,10 +191,10 @@ app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
 // API endpoint to fetch messages with attachments and extractions
 app.get('/admin/messages', async (req, res) => {
-    if (!hasSupabase) {
-        res.json([]);
-        return;
-    }
+  if (!hasSupabase) {
+    res.json([]);
+    return;
+  }
 
   try {
     const { data, error } = await supabase
