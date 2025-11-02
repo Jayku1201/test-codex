@@ -81,13 +81,12 @@ async function summarizeText(text) {
         model: 'gpt-3.5-turbo',
         messages: [
           { role: 'system', content: 'You are a helpful assistant that summarizes messages.' },
-          { role: 'user', content: `\u8acb\u7528\u7e41\u9ad4\u4e2d\u6587\u7e3d\u7d50\u9019\u6bb5\u8a0a\u606f\u7684\u91cd\u9ede\uff0c\u9650\u523080\u5b57\u4ee5\u5167:\n${text}` }
+          { role: 'user', content: `請用繁體中文總結這段訊息的重點，限於80字以內:\n${text}` }
         ],
         max_tokens: 80,
       },
       {
         headers: {
- 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${OPENAI_API_KEY}`,
         },
@@ -105,51 +104,59 @@ async function handleMessage(event) {
   const { message, replyToken, source } = event;
   const userId = source?.userId || null;
 
-  // Insert message into messages table
-  let insertedMessage;
-  try {
-    const { data, error } = await supabase
- 
-      .from('messages')
-      .insert({
-        user_id: userId,
-        type: message.type,
-        message_text: message.text || message.title || null,
-        raw_event: event,
-      })
-      .select()
-      .single();
-    if (error) throw error;
-    insertedMessage = data;
-  } catch (err) {
-    console.error('Insert message error:', err);
+  // Insert message into messages table only if Supabase credentials exist
+  let insertedMessage = null;
+  if (hasSupabase) {
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .insert({
+          user_id: userId,
+          type: message.type,
+          message_text: message.text || message.title || null,
+          raw_event: event,
+        })
+        .select()
+        .single();
+      if (error) throw error;
+      insertedMessage = data;
+    } catch (err) {
+      console.error('Insert message error:', err);
+    }
   }
 
   // handle different message types
   if (['image','video','audio','file'].includes(message.type)) {
     try {
+      // Download attachment content
       const buffer = await downloadContent(message.id);
-      const fileName = `${message.id}-${(message.fileName || message.type)}`
-        .replace(/[^\w.\-]/g, '_');
+      const fileName = `${message.id}-${(message.fileName || message.type)}`.replace(/[^\w.\-]/g, '_');
       const contentType =
         message.type === 'image' ? 'image/jpeg' :
         message.type === 'video' ? 'video/mp4' :
         message.type === 'audio' ? 'audio/mpeg' :
         'application/octet-stream';
-      const publicUrl = await uploadToSupabase(buffer, fileName, contentType);
-      await supabase.from('attachments').insert({
-        message_id: insertedMessage?.id,
-        object_storage_url: publicUrl,
-        content_type: contentType,
-      });
-      await replyToLine(replyToken, { type: 'text', text: `\u5df2\u6536\u5230\u4e26\u4fdd\u5b58\u60a8\u7684${message.type}` });
+      // Only upload and save attachment if Supabase is configured and message inserted
+      if (hasSupabase && insertedMessage) {
+        if (hasSupabase && insertedMessage) {
+const publicUrl = await uploadToSupabase(buffer, fileName, contentType);
+        await supabase.from('attachments').insert({
+          message_id: insertedMessage.id,
+          object_storage_url: publicUrl,
+          content_type: contentType,
+        });
+      }
+      // Reply to user that file is received (always)
+      await replyToLine(replyToken, { type: 'text', text: `已收到並保存您的${message.type}` });
     } catch (err) {
       console.error('Attachment handling error:', err);
-      await replyToLine(replyToken, { type: 'text', text: '\u62b1\u6b49\uff0c\u6a94\u6848\u8655\u7406\u5931\u6557' });
+      await replyToLine(replyToken, { type: 'text', text: '抱歉，檔案處理失敗' });
     }
   } else if (message.type === 'text') {
+    // Summarize text
     const summary = await summarizeText(message.text);
-    if (summary && insertedMessage) {
+    // Save summary to database only if Supabase is configured and summary exists and message inserted
+    if (hasSupabase && summary && insertedMessage) {
       try {
         await supabase.from('extractions').insert({
           message_id: insertedMessage.id,
@@ -161,10 +168,11 @@ async function handleMessage(event) {
         console.error('Insert summary error:', err);
       }
     }
-    const replyText = summary ? `\u6458\u8981\uff1a${summary}` : '\u5df2\u6536\u5230\u8a0a\u606f';
+    // reply with summary or confirm
+    const replyText = summary ? `摘要：${summary}` : '已收到訊息';
     await replyToLine(replyToken, { type: 'text', text: replyText });
   } else {
-    await replyToLine(replyToken, { type: 'text', text: '\u6536\u5230\u60a8\u7684\u8a0a\u606f\uff01' });
+    await replyToLine(replyToken, { type: 'text', text: '收到您的訊息！' });
   }
 }
 
@@ -183,11 +191,11 @@ app.post('/webhook', async (req, res) => {
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
 // API endpoint to fetch messages with attachments and extractions
-app.get('/admin/messages', async (req, res) => {    if (!hasSupabase) {
+app.get('/admin/messages', async (req, res) => {
+    if (!hasSupabase) {
         res.json([]);
         return;
     }
-
 
   try {
     const { data, error } = await supabase
