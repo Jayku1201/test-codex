@@ -16,6 +16,16 @@ const {
 
 const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY) ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+// Dynamically capture admin user ID when first user interacts. This value is initially undefined and will be set
+// when a user sends a message to the bot. Subsequent messages will use this stored ID for notifications.
+let adminUserId;
+function setAdminUserIdIfUnset(userId) {
+  if (!adminUserId && userId) {
+    adminUserId = userId;
+    // TODO: optionally persist adminUserId to database if required
+  }
+}
+
 const app = express();
 app.use(express.json());
 
@@ -124,9 +134,13 @@ async function callChatGPT(text) {
 async function handleMessage(event) {
   const { message, replyToken, source } = event;
   const mentionees = message?.mention?.mentionees || [];
-  const isMentionBot = mentionees.some((m) => m.userId === BOT_USER_ID);
-  const isMentionOthers = mentionees.some((m) => m.userId !== BOT_USER_ID);
+  // Determine if the bot was mentioned or others were mentioned.
+  // LINE sets isSelf=true on mention objects that point to the bot itself.
+  const isMentionBot = mentionees.some((m) => m.isSelf);
+  const isMentionOthers = mentionees.some((m) => !m.isSelf);
   const userId = source?.userId || null;
+  // Capture the admin user ID if it's not already set
+  setAdminUserIdIfUnset(userId);
 
   // Insert message into Supabase messages table (text only)
   let insertedMessage = null;
@@ -166,8 +180,11 @@ async function handleMessage(event) {
   // If someone mentioned others in a group (notify admin)
   if (isMentionOthers) {
     const mentionIds = mentionees.map((m) => m.userId).join(', ');
-    const notifyText = `${userId} \u63d0\u5230 ${mentionIds}`;
-    await pushMessage(ADMIN_USER_ID, { type: 'text', text: notifyText });
+    const notifyText = `${userId} 提到 ${mentionIds}`;
+    // Only push to admin if we've captured an admin user ID
+    if (adminUserId) {
+      await pushMessage(adminUserId, { type: 'text', text: notifyText });
+    }
     return;
   }
 
