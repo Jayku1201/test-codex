@@ -128,30 +128,6 @@ async function getLastMemory(groupId) {
   }
 }
 
-// ---- State: 10s dedup for default reply ----
-let lastDefaultMessage = '';
-let lastDefaultTimestamp = 0;
-
-// ---- Health check ----
-app.get('/', (_, res) => {
-  res.status(200).send('LINE GPT assistant server with GPT replies is running');
-});
-
-// ---- Webhook ----
-app.post('/webhook', async (req, res) => {
-  try {
-    const events = req.body?.events || [];
-    for (const event of events) {
-      if (event.type === 'message') {
-        await handleMessage(event);
-      }
-    }
-    res.sendStatus(200);
-  } catch (err) {
-    console.error('Webhook error:', err.message || err);
-    res.sendStatus(500);
-  }
-});
 
 async function handleMessage(event) {
   const { replyToken, source, message } = event;
@@ -275,4 +251,30 @@ if (FF_MEMORIES && isMentionBot && (text.includes('記住') || text.startsWith('
     return;
   }
 }
+
+// ---- State: 10s dedup for default reply ----
+let lastDefaultMessage = '';
+let lastDefaultTimestamp = 0;
+
+// ---- Health check ----
+app.get('/', (_, res) => {
+  res.status(200).send('LINE GPT assistant server with GPT replies is running');
+});
+
+// ---- Webhook ----
+app.post('/webhook', async (req, res) => {
+  try {
+    const events = req.body?.events || [];
+    for (const event of events) {
+      if (event.type === 'message') {
+        await handleMessage(event);
+      }
+    }
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Webhook error:', err.message || err);
+    res.sendStatus(500);
+  }
+});
+
 
