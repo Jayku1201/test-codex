@@ -221,41 +221,6 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
-// 召回條件：@機器人 + 「上次」或 /recall；或未 @ 但明確提到「上次」/ /recall
-const recallIntent = /上次|\/recall/i.test(text);
-if (FF_MEMORIES && (isMentionBot || recallIntent)) {
-  const last = await getLastMemory(groupId);
-  await replyToLine(replyToken, last ? `你之前提過：${last}` : '目前沒有記錄。');
-  return;
-}
-async function saveMemory(groupId, userId, content) {
-  console.log('[MEMO] save groupId=', groupId, 'userId=', userId, 'content=', content);
-  if (!supabase) throw new Error('Supabase client not initialized');
-
-  const { error } = await supabase
-    .from('group_memories')
-    .insert({ group_id: groupId, user_id: userId, content });
-
-  if (error) throw error;
-}
-if (FF_MEMORIES && isMentionBot && (text.includes('記住') || text.startsWith('/remember'))) {
-  const memoryContent = text.replace(/(記住|\/remember)\s*/i, '').trim();
-  if (memoryContent) {
-    try {
-      await saveMemory(groupId, userId, memoryContent);
-      await replyToLine(replyToken, '我會記住。');
-    } catch (err) {
-      console.error('Save memory error:', err.message || err);
-      await replyToLine(replyToken, '記錄暫時失敗，我再試一次。');
-    }
-    return;
-  }
-}
-
-// ---- State: 10s dedup for default reply ----
-let lastDefaultMessage = '';
-let lastDefaultTimestamp = 0;
-
 // ---- Health check ----
 app.get('/', (_, res) => {
   res.status(200).send('LINE GPT assistant server with GPT replies is running');
